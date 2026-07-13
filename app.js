@@ -15,7 +15,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, "/public")));
 
 
-// STEP 1: SET UP CLIENT
+// BACKEND STEP 1: SET UP CLIENT
 
 // 1a: Create config
 const config = new Config();
@@ -28,7 +28,7 @@ const client = new Client(config);
 // 1c: Instantiate checkout from client
 const checkout = new CheckoutAPI(client);
 
-// STEP 2: CREATE A SESSION
+// BACKEND STEP 2: CREATE A SESSION
 // Step 2a: Define the API POST request
 app.post("/api/sessions", async (req, res) => {
     try {
@@ -51,21 +51,21 @@ app.post("/api/sessions", async (req, res) => {
         res.json({ id, sessionData });
     } catch (error) {
 
-        // STEP 3: API ERROR HANDLING
+        // BACKEND STEP 3: API ERROR HANDLING
         console.error("Adyen sessions error:", error);
         res.status(500).json({ error: error.message });
     }
 });
 
 // AUTHORISATION WEBHOOK ENDPOINT
-// Adyen sends event notifications (e.g. AUTHORISATION) to this endpoint.
-// The endpoint must return [accepted] within 10 seconds or Adyen will retry.
+// Create HMAC validator from Adyen library
 const { hmacValidator } = require("@adyen/api-library");
 const validator = new hmacValidator();
 
 app.post("/api/webhooks/notifications", (req, res) => {
     const { notificationItems } = req.body;
 
+    // Handle empty
     if (!notificationItems) {
         return res.status(400).json({ error: "Empty notification" });
     }
@@ -73,8 +73,7 @@ app.post("/api/webhooks/notifications", (req, res) => {
     for (const item of notificationItems) {
         const notification = item.NotificationRequestItem;
 
-        // Validate the HMAC signature to confirm the request came from Adyen
-        // and has not been tampered with. Reject anything that fails.
+        // Validate HMAC Signature
         if (!validator.validateHMAC(notification, process.env.HMAC_KEY)) {
             console.error("Invalid HMAC signature — ignoring notification");
             return res.status(401).send("Invalid HMAC signature");
@@ -83,16 +82,16 @@ app.post("/api/webhooks/notifications", (req, res) => {
         const { eventCode, success, pspReference, merchantReference } = notification;
         console.log(`Webhook received | event: ${eventCode} | success: ${success} | pspRef: ${pspReference} | ref: ${merchantReference}`);
 
-        // Handle specific event types here as your integration grows.
-        // AUTHORISATION is the most important — it confirms a payment was taken.
+        // Handle specific event types here as needed.
+
+        // AUTHORISATION success
         if (eventCode === "AUTHORISATION" && success === "true") {
             console.log(`Payment authorised for reference: ${merchantReference}`);
-            // TODO: fulfil the order in your database using merchantReference
+            // After this, use the merchantReference to fulfill the order
         }
     }
 
-    // Adyen requires this exact string response to acknowledge receipt.
-    // Without it, Adyen will retry the notification up to 10 times over 24 hours.
+    // Confirm response, otherwise Adyen will retry after 10 seconds
     res.status(200).send("[accepted]");
 });
 
